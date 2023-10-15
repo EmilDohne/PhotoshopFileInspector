@@ -1,6 +1,12 @@
-let IS_PSB = true;
+var IS_PSB = true;
 // A list of keys that have a length marker of 8 bytes in PSB mode
-EIGHT_BYTE_KEYS = ["LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD", "cinf"]
+var EIGHT_BYTE_KEYS = ["LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD", "cinf"]
+
+// A mapping of Image Resource IDs to Their names for display purposes
+var IMAGE_RESOURCE_ID_NAMES = {
+	1028 : "IPTC Record",
+	1060 : "XMP Metadata"
+}
 
 
 registerFileType((fileExt, filePath, fileData) => {
@@ -190,12 +196,60 @@ function readImageResources(sectionOffset)
 	setOffset(sectionOffset);
 
 	read(4);
-	addRow("ImageResourcesLength", getNumberValue(), "Length of image resource section. The length may be zero.");
 	const ImageResourceLength = getNumberValue();
-	// Skip this data for now
+	const ImageResourceOffset = readOffset();
+	let toRead = ImageResourceLength;
+	
+	addRow("Image Resources");
+	addDetails(() => {
+		addRow("Image Resources Length", ImageResourceLength, "Length of image resource section. The length may be zero.");
+		while(toRead > 0)
+		{
+			len = readImageResourceBlock();
+			toRead -= len;
+		}
+	});
+
+	setOffset(ImageResourceOffset);
 	read(ImageResourceLength);
 
 	return sectionOffset + ImageResourceLength + 4
+}
+
+// Read an individual Image Resource block
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+function readImageResourceBlock()
+{
+	let resourceBlockLen = 0;
+
+	read(4);
+	const Signature = getStringValue();	// Must be 8BIM
+	read(2);
+	const ImageResourceID = getNumberValue();	// Reference to what each ID does can be found here: https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/#50577409_38034
+	const [PascalString, PascalLength] = readPascalStr();	// Pascal String with its length padded to 2, this appears to be empty most of the time
+	read(4)
+	const ImageResourceSize = roundUpToMultiple(getNumberValue(), 2);	// This is also padded to a multiple of 2 like the pascal string
+	const ImageResourceMarker = readOffset();
+	read(ImageResourceSize);
+
+	resourceBlockLen += 4 + 2 + PascalLength + 4 + ImageResourceSize;
+
+	addRow("Image Resource", ImageResourceID, IMAGE_RESOURCE_ID_NAMES[ImageResourceID]);
+	addDetails(() => {
+		setOffset(ImageResourceMarker);
+		addRow("Signature", Signature, "Must be 8BIM");
+		addRow("Unique Identifier", ImageResourceID, IMAGE_RESOURCE_ID_NAMES[ImageResourceID]);
+		if (PascalString != null)
+		{
+			addRow("Pascal String", PascalString);
+		}
+		addRow("Image Resource Size", ImageResourceSize);
+		memdumpMaxAmountDetail(ImageResourceSize, 64, "Image Resource Data", ImageResourceMarker);
+	});
+	
+
+	return resourceBlockLen;
 }
 
 // Read the Layer and Mask Info section which is itself split up into Layer Info, Global Layer Mask Info and Additional Layer Information
@@ -567,15 +621,25 @@ function read_layer_blending_ranges(NumChannels){
 	}
 }
 
-function read_pascal_str(){
+// Read a pascal string and return an array with the string as first item and length as second item. If the string is empty the first item is null
+// The string is padded to a size of 2
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+function readPascalStr(){
+	let len = 0;
 	read(1);
-	const PascalLength = getNumberValue();
-	addRow("Pascal Length", PascalLength);
+	// This represents the length of the whole string including the 1 byte length field
+	let PascalLength = getNumberValue();
+	PascalLength = roundUpToMultiple(PascalLength + 1, 2);
+
 	if (PascalLength > 0 ){
-		read(PascalLength);
-		addRow("Pascal String", getStringValue());
+		read(PascalLength - 1);
+		len += PascalLength;
+		return [getStringValue(), len];
 	} else if (PascalLength == 0){
 		read(1);
+		len += 2;
+		return [null, len];
 	}
 }
 
