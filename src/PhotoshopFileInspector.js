@@ -4,8 +4,40 @@ var EIGHT_BYTE_KEYS = ["LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "
 
 // A mapping of Image Resource IDs to Their names for display purposes
 var IMAGE_RESOURCE_ID_NAMES = {
+	1005 : "ResolutionInfo Structure",
+	1006 : "Names of the Alpha Channels",
+	1010 : "Background Color",
+	1011 : "Print Flags",
+	1013 : "Color Halftoning Information",
+	1016 : "Color transfer functions",
+	1024 : "Layer State Information",
+	1026 : "Layers Group Information",
 	1028 : "IPTC Record",
-	1060 : "XMP Metadata"
+	1032 : "Grid and Guides Information",
+	1036 : "Thumbnail Resource",
+	1037 : "Global Angle, 4 bytes between 0 and 359 which is the lighting angle for effects layers",
+	1041 : "ICC Untagged Profile",
+	1043 : "Spot Halftone",
+	1044 : "Document-specific IDs Seed Number",
+	1045 : "Unicode Alpha Names",
+	1049 : "Global Altitude",
+	1050 : "Slices",
+	1053 : "Alpha Identifiers",
+	1054 : "URL List",
+	1057 : "Version Info",
+	1058 : "Exif data 1",
+	1060 : "XMP Metadata",
+	1061 : "Caption Digest (16 bytes : RSA Data Security, MD5 message-digest algorithm)",
+	1062 : "Print Scale",
+	1064 : "Pixel Aspect Ratio",
+	1067 : "Alternate Spot Colors",
+	1069 : "Layers Selection ID(s)",
+	1072 : "Layers Group Enabled ID",
+	1077 : "Display Info Structure",
+	1082 : "Print Information",
+	1083 : "Print Style",
+	10000: "Print flags Information"
+
 }
 
 
