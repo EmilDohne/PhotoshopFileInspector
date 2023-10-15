@@ -232,6 +232,8 @@ function readLayerMaskInfo(sectionOffset)
 // ---------------------------------------------------------------------------------------------------------------------
 function parseLayerMaskInfo(sectionOffset, sectionLength, layerLength)
 {
+	// Code adapted from psd_sdk by MolecularMatters to keep this as a single function for all color depths
+
 	// Read Layer Info Section
 	if(layerLength > 0){
 		const layerInfoOffset = readOffset();
@@ -251,7 +253,7 @@ function parseLayerMaskInfo(sectionOffset, sectionLength, layerLength)
 			let channelImageLengths = []
 			let channelImageSize = 0;
 			// Read the layer records for all layers and fill the array with channel layer sizes
-			for (let i = 0; i < LayerCount; i++)
+			for (let i = 0; i < Math.abs(LayerCount); i++)
 			{
 				const channelLengths = readLayerRecord(i);
 				for (let i = 0; i < channelLengths.length; i++)
