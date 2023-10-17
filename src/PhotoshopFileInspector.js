@@ -180,7 +180,7 @@ registerParser(() => {
 	});
 
 	// Color Mode Section
-	let image_resource_offset = readColorModeSection(colorMode, 26);
+	let image_resource_offset = readColorModeSection(colorMode, 26, Depth);
 
 	// Image Resources Section
 	let layer_mask_offset = readImageResources(image_resource_offset);
@@ -196,7 +196,7 @@ registerParser(() => {
 // Read the Color Mode Section, only relevant for indexed colors, otherwise empty
 // ---------------------------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
-function readColorModeSection(colorMode, sectionOffset)
+function readColorModeSection(colorMode, sectionOffset, depth)
 {
 	setOffset(sectionOffset);
 
@@ -335,7 +335,7 @@ function parseLayerMaskInfo(sectionOffset, sectionLength, layerLength)
 			addRow("LayerCount", LayerCount, "Number of layers in the file");
 			
 			// Read Layer Records and Channel Image Data
-			addRow('Layer Records');
+			addRow('Layer Records', 0, "One for each logical layer in the scene");
 			let channelImageLengths = []
 			let channelImageSize = 0;
 			// Read the layer records for all layers and fill the array with channel layer sizes
@@ -365,12 +365,15 @@ function parseLayerMaskInfo(sectionOffset, sectionLength, layerLength)
 			// Global Layer Mask Info Section
 			{
 				read(4);
-				GlobalLayerMaskInfoLength = getNumberValue();
-				addRow("Global Layer Mask Info Length", GlobalLayerMaskInfoLength);
+				const GlobalLayerMaskInfoLength = getNumberValue();
+				const GlobalLayerMaskInfoOffset = readOffset();
+				read(GlobalLayerMaskInfoLength)
 				if (GlobalLayerMaskInfoLength != 0)
 				{
 					addRow("Global Layer Mask Info");
 					addDetails(() => {
+						setOffset(GlobalLayerMaskInfoOffset);
+						addRow("Global Layer Mask Info Length", GlobalLayerMaskInfoLength);
 						memdumpMaxAmount(GlobalLayerMaskInfoLength, 64)
 					});
 				}
@@ -408,7 +411,9 @@ function parseLayerMaskInfo(sectionOffset, sectionLength, layerLength)
 						setOffset(additionaLayerSectionOffset);
 						addRow("Signature", additionaLayerInfoSignature, "'8BIM' or '8B64'");
 						addRow("Key", additionaLayerInfoKey, "Key: a 4-character code (See individual sections)");
-						// 16 or 32 bit documents store their layer info in the additional layer info section
+						// 16 or 32 bit documents store their layer info section in the additional layer info section
+						// under these tags. We pass in a section offset and section length of 0 to force parseLayerMaskInfo
+						// to only read layer info
 						if (additionaLayerInfoKey == "Lr16")
 						{
 							parseLayerMaskInfo(0, 0, additionalLayerLength);
@@ -474,13 +479,21 @@ function readLayerRecord(layerIndex){
 	read(1)	// Filler
 	
 	read(4);
-	let extraDataLen = getNumberValue();
+	const extraDataLen = getNumberValue();
 	const extraDataOffset = readOffset();
+
+	// Get the layer name to display it
+	skipLayerMaskData();
+	skipLayerBlendingRanges();
+	const [pascalStr, pascalLen] = readPascalStr(4);
+
+	// Skip the extra data for now
+	setOffset(extraDataOffset);
 	read(extraDataLen);
 
 	// Add UI elements later as anything in addDetails() gets run deferred
 	addDetails(() => {
-		addRow("Layer Record " + layerIndex);
+		addRow("Layer Record '" + pascalStr + "'", layerIndex);
 		addDetails(() => {
 			addRow("Number of Channels", numChannels);
 			addRow("Enclosing Rectangle", "[ " + coordinates[0] + ", " + coordinates[1] + ", " + coordinates[2] + ", " + coordinates[3] + " ]", "Top, Left, Bottom and Right coordinates")
@@ -498,11 +511,212 @@ function readLayerRecord(layerIndex){
 			addRow("Clipping", clipping, "0 = base, 1 = non-base")
 			addRow("Flags", flags, "bit 0 = transparency protected; bit 1 = visible; bit 2 = obsolete; bit 3 = 1 for Photoshop 5.0 and later, tells if bit 4 has useful information; bit 4 = pixel data irrelevant to appearance of document")
 			addRow("Extra Field Length", extraDataLen, "Length of the extra data field ( = the total length of the next five fields).")
-			memdumpMaxAmountDetail(extraDataLen, 64, "Extra Field Data", extraDataOffset);
+			setOffset(extraDataOffset);
+			let layerMaskDataLen = readLayerMaskData();
+			let layerBlendingRangesLen = readLayerBlendingRanges(numChannels);
+			read(pascalLen);
+			if(pascalStr)
+			{
+				addRow("Layer Name", pascalStr)
+			}
+			// Figure out what is left to read as this represent the additional layer information
+			let toRead = extraDataLen - pascalLen - layerBlendingRangesLen - layerMaskDataLen;
+			readAdditionalLayerInformation(toRead, readOffset());
 		});
 	});
 
+	setOffset(extraDataOffset + extraDataLen);
+
 	return channel_lengths;
+}
+
+// Read the Layer Mask Data at the end of a layer record, can be 4, 24 or 40 bytes
+// Return the length of the section INCLUDING the length marker
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+function readLayerMaskData(){
+	read(4);
+	let dataSize = getNumberValue()
+	let dataOffset = readOffset()
+	
+	const coordinates_str = ["top", "left", "bottom", "right"]
+	let coordinates = []
+	let defaultColor = 0;
+	let flags = 0;
+	let realFlags = 0;
+	let realUserMaskBackground = 0;
+	let realUserMaskCoordinates = [];
+
+	if(dataSize > 0){
+		for (let i = 0; i < 4; i++) {
+			read(4);
+			coordinates.push(getNumberValue())
+		}
+		read(1);
+		defaultColor = getNumberValue();
+		//Flags
+		read(1);
+		flags = getBitsValue();
+		if(flags[4] == '1'){
+			read(1);
+			maskParams = getBitsValue();
+			if(maskParams == "7" || maskParams == "5"){
+				read(8);
+			} else if (maskParams == "6" || maskParams == "4"){
+				read(1);
+			}
+		}
+		if(dataSize == 20)
+		{
+			// Padding bytes
+			read(2);
+		} else
+		{
+			// Real Flags
+			read(1);
+			realFlags = getBitsValue();
+			// Real User Mask background
+			read(1);
+			realUserMaskBackground = getNumberValue();
+			// Rectangle enclosing layer mask
+			for (let i = 0; i < 4; i++) {
+				read(4);
+				realUserMaskCoordinates.push(getNumberValue);
+			}
+		}
+		
+	}
+
+	addRow("Layer Mask Data")
+	addDetails(() => {
+		addRow("Size", dataSize, "Size of the data: Check the size and flags to determine what is or is not present. If zero, the following fields are not present")
+		if (dataSize > 0)
+		{
+			addRow("Default Color", defaultColor, "0 or 255");
+			addRow("Flags", flags, "Flags. bit 0 = position relative to layer; bit 1 = layer mask disabled; bit 2 = invert layer mask when blending (Obsolete); bit 3 = indicates that the user mask actually came from rendering other data; bit 4 = indicates that the user and/or vector masks have parameters applied to them");
+			
+			if(flags[4] == '1'){
+				addRow("Mask Parameters", maskParams, "Mask Parameters. Only present if bit 4 of Flags set above.")
+			}
+
+			for (let i = 0; i < 4; i++)
+			{
+				addRow("Rectangle enclosing layer " + coordinates_str[i], coordinates[i]);
+			}
+
+			if (dataSize > 20)
+			{
+				addRow("Real Flags", realFlags, "Same as Flags field above");
+				addRow("Real User Mask Background", realUserMaskBackground, "0 or 255");
+				for (let i = 0; i < 4; i++)
+				{
+					addRow("Rectangle enclosing layer " + coordinates_str[i], realUserMaskCoordinates[i]);
+				}
+			}
+		}
+	});
+	return dataSize + 4;
+}
+
+function skipLayerMaskData()
+{
+	read(4);
+	read(getNumberValue());
+}
+
+// Read the Layer Blending Ranges data found at the end of the layer record area
+// Return the length of the section INCLUDING the length marker
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+function readLayerBlendingRanges(NumChannels){
+	//Length of layer blending ranges data
+	read(4);
+	const dataLen = getNumberValue();
+	let toRead = getNumberValue();
+	const dataOffset = readOffset();
+	//Composite gray blend source. Contains 2 black values followed by 2 white values. Present but irrelevant for Lab & Grayscale
+	read(1);
+	const compositeGreySourceBlack0 = getNumberValue();
+	read(1);
+	const compositeGreySourceBlack1 = getNumberValue();
+	read(1);
+	const compositeGreySourceWhite0 = getNumberValue();
+	read(1);
+	const compositeGreySourceWhite1 = getNumberValue();
+	//Composite gray blend destination range
+	read(1);
+	const compositeGreyDestinationBlack0 = getNumberValue();
+	read(1);
+	const compositeGreyDestinationBlack1 = getNumberValue();
+	read(1);
+	const compositeGreyDestinationWhite0 = getNumberValue();
+	read(1);
+	const compositeGreyDestinationWhite1 = getNumberValue();
+	
+	toRead -= 8;
+
+	let channelSource = []
+	let channelDestination = []
+
+
+	for (let i = 0; i < NumChannels; i++){
+		// The documentation is a bit unclear about which channels to consider here so we keep reading until there is nothing left to read
+		if (toRead > 8)
+		{
+			// Source Range; First the two black values and then the two white values
+			read(1);
+			channelSource.push(getNumberValue());
+			read(1);
+			channelSource.push(getNumberValue());
+			read(1);
+			channelSource.push(getNumberValue());
+			read(1);
+			channelSource.push(getNumberValue());
+			// Destination Range; First the two black values and then the two white values
+			read(1);
+			channelDestination.push(getNumberValue());
+			read(1);
+			channelDestination.push(getNumberValue());
+			read(1);
+			channelDestination.push(getNumberValue());
+			read(1);
+			channelDestination.push(getNumberValue());
+			toRead -= 8;
+		}
+	}
+	if(toRead > 0)
+	{
+		read(toRead);	// Read potential padding bytes
+	}
+
+	addRow("Layer Blending Ranges")
+	addDetails(() => {
+		addRow("Length", dataLen);
+
+		// There is 2 values here as the slider can be split by holding down shift
+		addRow("Composite Gray blend source black", compositeGreySourceBlack0 + "/" + compositeGreySourceBlack1);
+		addRow("Composite Gray blend source white", compositeGreySourceWhite0 + "/" + compositeGreySourceWhite1);
+		addRow("Composite Gray blend destination black", compositeGreyDestinationBlack0 + "/" + compositeGreyDestinationBlack1);
+		addRow("Composite Gray blend destination white", compositeGreyDestinationWhite0 + "/" + compositeGreyDestinationWhite1);
+
+		for (let i = 0; i < Math.floor(channelDestination.length / 4); i++){
+			addRow("Channel " + i)
+			addDetails(() => {
+				addRow("source range black", channelSource[i*4 + 0] + "/" + channelSource[i*4 + 1]);
+				addRow("source range white", channelSource[i*4 + 2] + "/" + channelSource[i*4 + 3]);
+
+				addRow("destination range black", channelDestination[i*4 + 0] + "/" + channelDestination[i*4 + 1]);
+				addRow("destination range white", channelDestination[i*4 + 2] + "/" + channelDestination[i*4 + 3]);
+			})
+		}
+	});
+	return dataLen + 4;
+}
+
+function skipLayerBlendingRanges()
+{
+	read(4);
+	read(getNumberValue());
 }
 
 // Read an entire Channel Image Data section based on the Array of Channel lengths and total length provided
@@ -528,6 +742,70 @@ function readChannelImageData(channelImageLengths, channelImageSize)
 
 			const offset = readOffset();
 			memdumpMaxAmountDetail(channel - 2, 128, "Channel Memory Dump", offset)
+		}
+	});
+}
+
+// Read a section of additional layer information found both at the end of each layer record. As the size is never 
+// explicitly defined we keep reading until either the max length is reached or we do not encounter a tagged block with 
+// signature 8BIM/8B64.
+// ---------------------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------------------
+function readAdditionalLayerInformation(maxLen, memOffset)
+{
+	if (maxLen == 0)
+	{
+		return;
+	}
+	let toRead = maxLen;
+	
+	read(maxLen);
+	addRow("Additional Layer Information")
+	addDetails(() => {
+		setOffset(memOffset);
+		// Iterate all the tagged blocks
+		while(toRead > 0)
+		{
+			read(4);
+			const additionaLayerInfoSignature = getStringValue()
+			if(additionaLayerInfoSignature != "8BIM" && additionaLayerInfoSignature != "8B64")
+			{
+				addRow("Failed Signature Check", additionaLayerInfoSignature)
+				setOffset(readOffset() - 4);
+				break;
+			}
+			read(4);
+			const additionaLayerInfoKey = getStringValue()
+			if (EIGHT_BYTE_KEYS.includes(additionaLayerInfoKey))
+			{
+				readPsdPsb(4, 8);
+				toRead -= 4 * 2 + swapPsdPsb(4, 8);
+			} else
+			{
+				read(4);
+				toRead -= 4 * 3
+			}
+			let additionalLayerLength = getNumberValue()
+			const additionaLayerSectionOffset = readOffset()	// Offset of this individual section
+			additionalLayerLength = roundUpToMultiple(additionalLayerLength, 2);
+
+			read(additionalLayerLength);
+			
+			addRow("Additional Layer Section", additionaLayerInfoKey)
+			addDetails(() => {
+				setOffset(additionaLayerSectionOffset);
+				addRow("Signature", additionaLayerInfoSignature);
+				addRow("Key", additionaLayerInfoKey);
+				memdumpMaxAmountDetail(additionalLayerLength, 64, "Data", additionaLayerSectionOffset)
+			});
+
+			toRead -= additionalLayerLength;
+		}
+		// Might be filler bytes?
+		if(toRead > 0)
+		{
+			addRow("Read " + toRead + " Padding Bytes");
+			read(toRead);
 		}
 	});
 }
@@ -591,86 +869,24 @@ function readImageData(sectionOffset, ChannelCount, Height, Width, Depth)
 }
 
 
-function read_layer_mask(){
-	read(4);
-	let data_size = getNumberValue()
-	addRow("Size", data_size, "Size of the data: Check the size and flags to determine what is or is not present. If zero, the following fields are not present")
-
-	if(data_size > 0){
-		const coordinates = ["top", "left", "bottom", "right"]
-		for (let i = 0; i < 4; i++) {
-			read(4);
-			addRow(coordinates[i], getNumberValue());
-		}
-		read(1);
-		addRow("Default Color", getNumberValue(), "0 or 255");
-
-		//Flags
-
-		read(1);
-		let flags = getBitsValue();
-		addRow("Flags", flags, "Flags. bit 0 = position relative to layer; bit 1 = layer mask disabled; bit 2 = invert layer mask when blending (Obsolete); bit 3 = indicates that the user mask actually came from rendering other data; bit 4 = indicates that the user and/or vector masks have parameters applied to them");
-
-		if(flags[4] == '1'){
-			read(1);
-			mask_params = getBitsValue();
-			addRow("Mask Parameters", mask_params, "Mask Parameters. Only present if bit 4 of Flags set above.")
-
-			if(mask_params == "7" || mask_params == "5"){
-				read(8);
-			} else if (mask_params == "6" || mask_params == "4"){
-				read(1);
-			}
-		}
-
-		if(data_size == 20){
-			// Padding bytes
-			read(2);
-		}
-
-		// Real Flags
-		read(1);
-		// Real User Mask background
-		read(1);
-		// Rectangle enclosing layer mask
-		read(16);
-	}
-}
-
-function read_layer_blending_ranges(NumChannels){
-	//Length of layer blending ranges data
-	read(4);
-	//Composite gray blend source. Contains 2 black values followed by 2 white values. Present but irrelevant for Lab & Grayscale
-	read(4);
-	//Composite gray blend destination range
-	read(4);
-
-	for (let i = 0; i < NumChannels; i++){
-		// Source Range
-		read(4);
-		// Destination Range
-		read(4);
-	}
-}
-
 // Read a pascal string and return an array with the string as first item and length as second item. If the string is empty the first item is null
 // The string is padded to a size of 2
 // ---------------------------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
-function readPascalStr(){
+function readPascalStr(padding = 2){
 	let len = 0;
 	read(1);
 	// This represents the length of the whole string including the 1 byte length field
 	let PascalLength = getNumberValue();
-	PascalLength = roundUpToMultiple(PascalLength + 1, 2);
+	PascalLength = roundUpToMultiple(PascalLength + 1, padding);
 
 	if (PascalLength > 0 ){
 		read(PascalLength - 1);
 		len += PascalLength;
 		return [getStringValue(), len];
 	} else if (PascalLength == 0){
-		read(1);
-		len += 2;
+		read(PascalLength - 1);
+		len += PascalLength - 1;
 		return [null, len];
 	}
 }
