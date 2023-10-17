@@ -639,6 +639,15 @@ function readLayerBlendingRanges(NumChannels){
 	//Length of layer blending ranges data
 	read(4);
 	const dataLen = getNumberValue();
+	if(dataLen == 0)
+	{
+		addRow("Layer Blending Ranges");
+		addDetails(() => {
+			addRow("Length", 0);
+		})
+		return 4;
+		
+	}
 	let toRead = getNumberValue();
 	const dataOffset = readOffset();
 	//Composite gray blend source. Contains 2 black values followed by 2 white values. Present but irrelevant for Lab & Grayscale
@@ -748,7 +757,7 @@ function readChannelImageData(channelImageLengths, channelImageSize)
 			addRow("Length of Channel", channel, "Includes Compression Method Marker (+2)")
 
 			const offset = readOffset();
-			memdumpMaxAmountDetail(channel - 2, 128, "Channel Memory Dump", offset)
+			memdumpMaxAmountDetail(channel - 2, 2048, "Channel Memory Dump", offset)
 		}
 	});
 }
