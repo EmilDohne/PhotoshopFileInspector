@@ -850,13 +850,22 @@ function readImageData(sectionOffset, ChannelCount, Height, Width, Depth)
 	// Read RAW Image Data
 	if (CompressionMethod == 0)
 	{
+		sectionPtrs = [];
+		sectionPtrs.push(readOffset());
 		// Read the actual pixel values
 		for(let i = 0; i < ChannelCount; i++)
 		{
+			setOffset(sectionPtrs[i]);
 			addRow("Channel", i)
+			read(Height * Width * (Depth / 8));
+
 			addDetails(() => {
+				setOffset(sectionPtrs[i]);
 				memdumpMaxAmount(Height * Width * (Depth / 8), 512);
 			});
+
+			// Store the next pointer
+			sectionPtrs.push(sectionPtrs[i] + Height * Width * (Depth / 8));
 		}
 	}
 	// Read RLE Encoded Image Data
