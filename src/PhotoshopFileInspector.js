@@ -204,19 +204,26 @@ function readColorModeSection(colorMode, sectionOffset, depth)
 		Duotone = unknown
 		Else = 4 bytes */
 		if (colorMode == 2) {
-			read(768);
+			read(768 + 4);
 			addRow('Indexed Color');
 			addDetails(() => {
-				read(768);
+				read(768 + 4);
 				addMemDump();
 			});
 
-			return sectionOffset + 768
+			return sectionOffset + 768 + 4
 		} else {
 			read(4);
-			addRow("ColorModeData", getNumberValue(), "For all but Indexed and Duotone colors this section is an empty 4 byte field set to 0");
+			const sectionSize = getNumberValue();
+			addRow("ColorModeData", sectionSize, "For all but Indexed and Duotone colors this section is an empty 4 byte field set to 0");
+			// 32-bit files have some magic information here that is undocumented but required when writing a 32-bit Photoshop file
+			if (sectionOffset != 0){
+				addDetails(() => {
+					memdumpMaxAmount(sectionSize, 112);
+				})
+			}
 			
-			return sectionOffset + 4
+			return sectionOffset + 4 + sectionSize;
 		}
 }
 
