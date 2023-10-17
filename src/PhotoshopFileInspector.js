@@ -867,10 +867,14 @@ function readImageData(sectionOffset, ChannelCount, Height, Width, Depth)
 			// Store the next pointer
 			sectionPtrs.push(sectionPtrs[i] + Height * Width * (Depth / 8));
 		}
+		addRow("End of File marker", sectionPtrs[sectionPtrs.length - 1]);
+
 	}
 	// Read RLE Encoded Image Data
 	if (CompressionMethod == 1)
 	{
+		sectionPtrs = [];
+		sectionPtrs.push(readOffset());
 		// For each of the channels there is a 2/4 byte field of the size of the following scanline
 		for(let i = 0; i < ChannelCount; i++)
 		{
@@ -884,10 +888,15 @@ function readImageData(sectionOffset, ChannelCount, Height, Width, Depth)
 		// Read the actual pixel values
 		for(let i = 0; i < ChannelCount; i++)
 		{
+			setOffset(sectionPtrs[i]);
 			addRow("Channel", i)
+			read(channelSize[i]);
 			addDetails(() => {
+				setOffset(sectionPtrs[i]);
 				memdumpMaxAmount(channelSize[i], 512)
 			});
+			// Store the next pointer
+			sectionPtrs.push(sectionPtrs[i] + channelSize[i]);
 		}
 	}
 	});
